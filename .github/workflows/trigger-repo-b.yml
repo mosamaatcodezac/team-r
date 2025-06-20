@@ -1,4 +1,4 @@
-name: Deploy Team Code to Client Repo (Safe Merge)
+name: Deploy Code to Client Repo
 
 on:
   workflow_dispatch:
@@ -6,39 +6,83 @@ on:
       commitMessage:
         description: 'Commit message'
         required: true
-        default: 'Sync from team-r to client-r'
+        default: ''
 
+  # push:
+  #   branches:
+  #     - main
+  #   paths:
+  #     - 'src/**'
+  #     - 'public/**'
+  #     - 'components/**'
+  #     - 'utils/**'
+  #     - 'package.json'
+  #     - 'tsconfig.json'
+  #     - 'next.config.js'
+      
+  # pull_request:
+  #   branches:
+  #     - main
+  #   types: [closed]
 jobs:
   safe-sync-to-client:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
-
+    env:
+      TEAM_REPO_OWNER: mosamaatcodezac
+      TEAM_REPO_NAME: team-r
+      TEAM_REPO_BRANCH: main
+      CLIENT_REPO_OWNER: tahiraziznu
+      CLIENT_REPO_NAME: client-r
+      CLIENT_REPO_BRANCH: main
     steps:
-      - name: Checkout team-r (this repo)
+      - name: Checkout ${{ env.TEAM_REPO_NAME }} code
         uses: actions/checkout@v3
         with:
+          persist-credentials: false
           fetch-depth: 0
+          ref: ${{ env.TEAM_REPO_BRANCH }}
 
       - name: Setup Git Identity
         run: |
           git config --global user.name "Tahir Aziz"
           git config --global user.email "tahiraziznu@gmail.com"
 
-      - name: Clone client-r repo and merge team-r code
+      - name: Clone ${{ env.CLIENT_REPO_NAME }} repo and merge code
         env:
           CLIENTPAT: ${{ secrets.CLIENTPAT }}
         run: |
-          echo "🔐 Cloning client-r repository..."
-          git clone https://x-access-token:${CLIENTPAT}@github.com/tahiraziznu/client-r.git client-repo
+          echo "🔐 Cloning $CLIENT_REPO_NAME repository..."
+          git clone https://x-access-token:${CLIENTPAT}@github.com/${CLIENT_REPO_OWNER}/${CLIENT_REPO_NAME}.git client-repo
+          echo "📁 Syncing selected files from $TEAM_REPO_NAME to $CLIENT_REPO_NAME..."
+
+          rsync -av --progress ./ ./client-repo \
+            --exclude .git \
+            --exclude '.github/***' \
+            --exclude 'node_modules/***' \
+            --exclude client-repo \
+            --exclude '.env' \
+            --exclude '.vscode/***' \
+            --exclude '*.test.*' \
+            --exclude 'public/test-data/***' \
+            --include 'src/***' \
+            --include 'public/***' \
+            --include 'components/***' \
+            --include 'utils/***' \
+            --include 'package.json' \
+            --include 'tsconfig.json' \
+            --include 'next.config.js' \
+            --exclude '*' \
+            ./ ./client-repo
           cd client-repo
 
-          echo "🔁 Adding mosamaatcode/team-r as remote..."
-          git remote add team-r https://github.com/mosamaatcodezac/team-r.git
-          git fetch team-r
+          echo "🔁 Adding $TEAM_REPO_OWNER/$TEAM_REPO_NAME as remote..."
+          git remote add team-repo https://github.com/${TEAM_REPO_OWNER}/${TEAM_REPO_NAME}.git
+          git fetch team-repo
 
-          echo "🔀 Merging team-r/main into client-r/main..."
-          git checkout main
-          git merge team-r/main --no-edit || echo "⚠️ Merge completed with conflicts — please resolve manually."
+          echo "🔀 Merging $TEAM_REPO_NAME/$TEAM_REPO_BRANCH into $CLIENT_REPO_NAME/$CLIENT_REPO_BRANCH..."
+          git checkout $CLIENT_REPO_BRANCH
+          git merge team-repo/$TEAM_REPO_BRANCH --no-edit || echo "⚠️ Merge completed with conflicts — please resolve manually."
 
           echo "🧪 Checking for merge conflicts..."
           if git ls-files -u | grep -q .; then
@@ -46,6 +90,7 @@ jobs:
             exit 1
           fi
 
-          echo "✅ Committing and pushing merged code to client-r..."
+          echo "✅ Committing and pushing merged code to $CLIENT_REPO_NAME..."
+          git add .
           git commit -am "${{ github.event.inputs.commitMessage }}" || echo "⚠️ Nothing to commit"
-          git push origin main
+          git push origin $CLIENT_REPO_BRANCH
